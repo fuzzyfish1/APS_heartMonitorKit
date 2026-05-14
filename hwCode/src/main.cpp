@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <arduinoFFT.h>
 
-// # define LED_BUILTIN 13 defined by arduino.h
 #define BTN_PIN 4
 #define LCD_ADDR 0x27
 // ^^ is wired like an I2C device, you should explain what I2C and address is,
@@ -10,19 +10,99 @@
 // the backlight display pins should have a jumper
 #define HBS_PIN A0
 
+// ----- for Day 2
+// program CTRL
 #define LCD_ROWS 4
-#define LCD_COLS 20
+#define LCD_COLS 16
 
 #define SAMP_TME 16667 // in uS for analog smoothing
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
-#define SAMP_N 20
+// delay is 2ms, we need a 5s window
+#define SAMP_N 300
 #define threshold 350
-#define SLOPE_MIN 10
+// vv needs tuning, was 10
+#define SLOPE_MIN 3
 
-int i = 0;
+// ---- Configuration ---------------------------------------------------------
+// Frequency resolution = SAMPLE_RATE / SAMPLES = 50/128 = 0.39 Hz = 23.4 BPM
+// Parabolic interpolation around the peak gets us sub-bin (~1-2 BPM) accuracy.
+const uint16_t SAMPLES = 128;
+const float SAMPLE_RATE = 50.0f;
+const unsigned long SAMPLE_US = (unsigned long) (1000000.0f / SAMPLE_RATE);
+
+// ---- FFT buffers -----------------------------------------------------------
+float vReal[SAMPLES];
+float vImag[SAMPLES];
+ArduinoFFT<float> FFT(vReal, vImag, SAMPLES, SAMPLE_RATE);
+
+struct Biquad {
+	float b0, b1, b2, a1, a2, z1, z2;
+};
+
+Biquad bp = {0.1795f, 0.0f, -0.1795f, -1.6151f, 0.6409f, 0.0f, 0.0f};
+
+static inline float biquadStep(Biquad &f, float x) {
+	float y = f.b0 * x + f.z1;
+	f.z1 = f.b1 * x - f.a1 * y + f.z2;
+	f.z2 = f.b2 * x - f.a2 * y;
+	return y;
+}
+
+float trackedBPM = 75.0f;
+bool hrLocked = false;
+const float MIN_BPM = 40.0f;
+const float MAX_BPM = 200.0f;
+const float MAX_BPM_JUMP = 15.0f;
+
+float runMean = 0.0f;
+float runVar = 1.0f;
+const float STATS_ALPHA = 0.01f; // EMA rate for mean/var
+const float THRESH_K = 0.5f; // threshold = mean + K*std
+bool aboveThresh = false;
+unsigned long lastBeatMs = 0;
+const unsigned long REFRACTORY_MS = 280; // 214 BPM ceiling
+
+bool ledOn = false;
+unsigned long ledOffAtMs = 0;
+const unsigned long LED_FLASH_MS = 120;
+
+static inline void serviceLED() {
+	if (ledOn && (long) (millis() - ledOffAtMs) >= 0) {
+		lcd.setCursor(1,1);
+		lcd.write(0);
+		digitalWrite(LED_BUILTIN, LOW);
+		ledOn = false;
+	}
+}
+
+//int i = 0;
+
+byte SMALL_HEART[8] = {
+	0b00000,
+	0b00000,
+	0b00000,
+	0b01110,
+	0b00100,
+	0b00000,
+	0b00000,
+	0b00000
+};
+
+// Define the 5x8 custom heart character
+byte BIG_HEART[8] = {
+	0b00000, // 0
+	0b01010, // # #
+	0b11111, // #####
+	0b11111, // #####
+	0b01110, //  ###
+	0b00100, //   #
+	0b00000, // 0
+	0b00000 // 0
+};
 
 // for debugging, detects connected I2C devices (LCD display in this case)
+/*
 void I2C_Scan() {
 	byte error, address;
 	int nDevices;
@@ -52,7 +132,7 @@ void I2C_Scan() {
 
 	delay(5000); // Wait 5 seconds for next scan
 }
-
+*/
 float reads[SAMP_N];
 
 void setup() {
@@ -72,25 +152,32 @@ void setup() {
 	lcd.backlight();
 	// Set cursor to column 0, line 0
 	lcd.setCursor(0, 0);
-	lcd.print("Hello, HeartEaterBeater");
+	lcd.createChar(0, SMALL_HEART);
+	lcd.createChar(1, BIG_HEART);
+	lcd.write(0);
+	//lcd.print("Hello, HeartEaterBeater");
+	delay(1000);
 }
 
 // filters all 60hz signals entirely (mains power)
+/*
 int readFiltered(int pin) {
 	unsigned int sampleCount = 0;
 	unsigned long total = 0;
 
-	for ( unsigned long start = micros(); micros() - start < SAMP_TME;) {
+	for (unsigned long start = micros(); micros() - start < SAMP_TME;) {
 		total += analogRead(pin);
 		sampleCount++;
 	}
 
 	return (int)(total / sampleCount);
 }
-
+*/
 bool rising = true;
 unsigned long peakTime = 0;
 long delta = 1000;
+float total = 0;
+
 void loop() {
 	// // day 1 reading from a button and display to LCD
 	// if (digitalRead(BTN_PIN) == LOW) {
@@ -105,59 +192,148 @@ void loop() {
 	// Serial.print("Signal: ");
 	// Serial.println(signal);
 
-	/* this algorithm is intentionally designed to fail btw
-	 * its simple to understand
-	 * however, the signal is noisy and we are looking for a spike from the baseline which could
-	 * potentially move depending on what finger you use and how hard you press
-	 * to solve this, we use a few different algorithms stacked
+	/* Day 2: code, rolling avg threshold
+	 *
 	*/
-
-
 	/*
-	if (signal <= threshold) {
+	reads[i] = analogRead(HBS_PIN);
+	total += reads[i] - reads[(i + 1) % SAMP_N];
+
+	float avg = total / SAMP_N;
+
+	Serial.print("avg: ");
+	Serial.print(avg);
+	Serial.print(", read: ");
+	Serial.print(reads[i]);
+	Serial.print(", i: ");
+	Serial.print(i);
+
+	if (reads[i] > avg) {
+		lcd.setCursor(0,0);
+		lcd.write(1);
+		lcd.print("BEAT");
+		Serial.print("BEAT");
+		digitalWrite(LED_BUILTIN, HIGH);
+	} else {
 		lcd.clear();
+		lcd.write(0);
 		digitalWrite(LED_BUILTIN, LOW);
-	} else if (digitalRead(BTN_PIN) == HIGH) {
-		digitalWrite(LED_BUILTIN, HIGH);
-		lcd.setCursor(0, 0);
-		lcd.print("BEAT");
 	}
+
+	++i %= SAMP_N;
+	Serial.println("");
+
+	delay(5);
 	*/
+
 	// final algo
+	unsigned long t = micros();
+	for (uint16_t i = 0; i < SAMPLES; i++) {
+		while ((long) (micros() - t) < 0) {
+			serviceLED(); // turn LED off on schedule
+		}
+		t += SAMPLE_US;
 
-	int signal = readFiltered(HBS_PIN);
-	digitalWrite(LED_BUILTIN, LOW);
-	reads[i] = signal;
+		int raw = analogRead(HBS_PIN);
+		float x = (float) raw - 512.0f;
+		float y = biquadStep(bp, x);
+		vReal[i] = y;
+		vImag[i] = 0.0f;
 
-	long slope = reads[i] - reads[(i +1) % SAMP_N];
+		float delta = y - runMean;
+		runMean += STATS_ALPHA * delta;
+		runVar = (1.0f - STATS_ALPHA) * (runVar + STATS_ALPHA * delta * delta);
+		float thresh = runMean + THRESH_K * sqrtf(runVar);
 
-	if (!rising && slope > SLOPE_MIN) {
-		rising = true;
-	} else if (rising && slope < -SLOPE_MIN) {
+		unsigned long nowMs = millis();
 
-		lcd.clear();
-		lcd.setCursor(0, 0);
-		lcd.print("BEAT");
-		long tmp = millis();
-		delta = tmp - peakTime;
-		peakTime = tmp;
-		digitalWrite(LED_BUILTIN, HIGH);
-		rising = false;
+		if (!aboveThresh && y > thresh && (nowMs - lastBeatMs) > REFRACTORY_MS) {
+			aboveThresh = true;
+			lastBeatMs = nowMs;
+
+			lcd.setCursor(1,1);
+			lcd.write(1);
+			digitalWrite(LED_BUILTIN, HIGH);
+			ledOn = true;
+			ledOffAtMs = nowMs + LED_FLASH_MS;
+		}
+		if (aboveThresh && y < runMean) {
+			aboveThresh = false;
+		}
+		serviceLED();
 	}
 
-	lcd.setCursor(0, 1);
-	lcd.print("HR: ");
-	double BPM = double(1)/ delta * 1000 * 60;
+	FFT.windowing(FFTWindow::Hamming, FFTDirection::Forward);
+	FFT.compute(FFTDirection::Forward);
+	FFT.complexToMagnitude();
+	serviceLED();
 
-	lcd.print(BPM);
+	const float bpmToBin = (float) SAMPLES / (SAMPLE_RATE * 60.0f);
+	uint16_t binLo = (uint16_t) (MIN_BPM * bpmToBin);
+	uint16_t binHi = (uint16_t) (MAX_BPM * bpmToBin);
+	if (binLo < 1) binLo = 1;
+	if (binHi > SAMPLES / 2 - 1) binHi = SAMPLES / 2 - 1;
 
-	Serial.print("signal: ");
-	Serial.print(signal);
-	Serial.print(",slope: ");
-	Serial.print(slope);
-	Serial.print(",");
-	Serial.print(delta);
+	uint16_t sLo = binLo, sHi = binHi;
+	if (hrLocked) {
+		float lo = trackedBPM - MAX_BPM_JUMP;
+		float hi = trackedBPM + MAX_BPM_JUMP;
+		if (lo < MIN_BPM) lo = MIN_BPM;
+		if (hi > MAX_BPM) hi = MAX_BPM;
+		sLo = (uint16_t) (lo * bpmToBin);
+		sHi = (uint16_t) (hi * bpmToBin);
+		if (sLo < binLo) sLo = binLo;
+		if (sHi > binHi) sHi = binHi;
+	}
 
-	i++;
-	i%=SAMP_N;
+	uint16_t peakBin = sLo;
+	float peakMag = 0.0f;
+	for (uint16_t b = sLo; b <= sHi; b++) {
+		if (vReal[b] > peakMag) {
+			peakMag = vReal[b];
+			peakBin = b;
+		}
+	}
+
+	if (hrLocked) {
+		float meanMag = 0.0f;
+		for (uint16_t b = binLo; b <= binHi; b++) meanMag += vReal[b];
+		meanMag /= (float) (binHi - binLo + 1);
+		if (peakMag < 1.8f * meanMag) {
+			peakMag = 0.0f;
+			peakBin = binLo;
+			for (uint16_t b = binLo; b <= binHi; b++) {
+				if (vReal[b] > peakMag) {
+					peakMag = vReal[b];
+					peakBin = b;
+				}
+			}
+		}
+	}
+
+	float refinedBin = (float) peakBin;
+	if (peakBin > binLo && peakBin < binHi) {
+		float a = vReal[peakBin - 1];
+		float b = vReal[peakBin];
+		float c = vReal[peakBin + 1];
+		float denom = a - 2.0f * b + c;
+		if (fabsf(denom) > 1e-6f) {
+			refinedBin = (float) peakBin + 0.5f * (a - c) / denom;
+		}
+	}
+
+	float bpm = refinedBin / bpmToBin;
+	if (!hrLocked) {
+		trackedBPM = bpm;
+		hrLocked = true;
+	} else { trackedBPM = 0.7f * bpm + 0.3f * trackedBPM; }
+
+	Serial.print(F("BPM: "));
+	Serial.println(trackedBPM, 1);
+	lcd.clear();
+	lcd.setCursor(0, 0);
+	lcd.print("BPM: ");
+	lcd.print(bpm);
+
+	serviceLED();
 }
