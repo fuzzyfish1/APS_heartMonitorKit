@@ -42,22 +42,24 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
  * Unit 3:
  * TROIKA ALGO, please see Docs
  *
- * Docs + links: labeled by skim or read
- * https://link.springer.com/article/10.1007/s11831-021-09597-4 << Cite this for TROIKA Algo, READ
+ * Docs + links: labeled by skim or read or if you still want more
+ * https://link.springer.com/article/10.1007/s11831-021-09597-4 << Cite this for TROIKA Algo, FRFR READ TS
  * https://learn.adafruit.com/scanning-i2c-addresses/arduino << I2C device scan, READ
- * https://gist.github.com/tfeldmann/5411375 << another I2C san (not the one I used but it's cool), skim
- * https://www.adafruit.com/product/1093?srsltid=AfmBOoqwTVR6AGR2bwP1o3GK9-nqLg_Dyd-FgV7eGp7fDjfm3NMKhWae << heartBeat Sensor, skim
- * https://medium.com/@lnandanapalli/efficient-array-wrapping-the-modulo-trick-every-developer-should-know-7ee614272100 << Modulo operator, skim
- * https://docs.arduino.cc/built-in-examples/digital/Debounce/ << how the button SHOULD be wired, skim
+ * https://gist.github.com/tfeldmann/5411375 << another I2C san (not the one I used but it's cool), if you want more
+ * https://www.adafruit.com/product/1093?srsltid=AfmBOoqwTVR6AGR2bwP1o3GK9-nqLg_Dyd-FgV7eGp7fDjfm3NMKhWae << heartBeat Sensor, if you want more
+ * https://medium.com/@lnandanapalli/efficient-array-wrapping-the-modulo-trick-every-developer-should-know-7ee614272100 << Modulo operator, READ mention to kids
+ * https://docs.arduino.cc/built-in-examples/digital/Debounce/ << how the button SHOULD be wired, << for Zain for later, maybe you could add this in Unit 1 info
  * our code doesn't debounce, but that will be a later addition but it's cool to help the kids understand digital/analog signals
  *
- * https://www.norwegiancreations.com/2017/09/arduino-tutorial-using-millis-instead-of-delay/ << Millis vs Delay, skim
+ * https://www.norwegiancreations.com/2017/09/arduino-tutorial-using-millis-instead-of-delay/ << Millis vs Delay, READ
  * this is seriously a much more complex problem in modern x86 which would be cool to talk about to kids
  * but i don't really got links for how complex time sharing is from schedulers to timer chirp interrupts, gnu linux, fork(), Cores + threads
  * but I can explain what to look up
  *
- * understanding Fourier Transform, this is not Fast Fourier transform which is what we are using and is quite different but you should look that up
- * https://www.youtube.com/watch?v=spUNpyF58BY&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=1 << 3b1b, probably the best explanations you could find
+ *** understanding Fourier Transform**,
+ * this is not Fast Fourier transform which is what we are using and is quite different but this gives a mathematical foundation for it
+ * show one of these to the kids eventually
+ * https://www.youtube.com/watch?v=spUNpyF58BY&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=1
  * https://www.youtube.com/watch?v=MBnnXbOM5S4&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=2
  * https://www.youtube.com/watch?v=ToIXSwZ1pJU&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=3
  * https://www.youtube.com/watch?v=r6sGWTCMz2k&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=4
