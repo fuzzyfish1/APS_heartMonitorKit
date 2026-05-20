@@ -24,6 +24,45 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 // vv needs tuning, was 10
 #define SLOPE_MIN 3
 
+/**
+ * System -
+ *   OS:  [Linux Mint 22.1 x86 Cinnamon]
+ *   IDE: [CLion + PlatformIO]
+ * Author: Zain Ali
+ *
+ * APS ReadySetCode HeartBeat Kit Example Code
+ * Showcases 3 different algorithms for different ways to detect heartbeats
+ *
+ * Unit 1:
+ * use a button to figure out hardware
+ *
+ * Unit 2:
+ * use an Analog PulseSensor to do things
+ *
+ * Unit 3:
+ * TROIKA ALGO, please see Docs
+ *
+ * Docs + links: labeled by skim or read
+ * https://link.springer.com/article/10.1007/s11831-021-09597-4 << Cite this for TROIKA Algo, READ
+ * https://learn.adafruit.com/scanning-i2c-addresses/arduino << I2C device scan, READ
+ * https://gist.github.com/tfeldmann/5411375 << another I2C san (not the one I used but it's cool), skim
+ * https://www.adafruit.com/product/1093?srsltid=AfmBOoqwTVR6AGR2bwP1o3GK9-nqLg_Dyd-FgV7eGp7fDjfm3NMKhWae << heartBeat Sensor, skim
+ * https://medium.com/@lnandanapalli/efficient-array-wrapping-the-modulo-trick-every-developer-should-know-7ee614272100 << Modulo operator, skim
+ * https://docs.arduino.cc/built-in-examples/digital/Debounce/ << how the button SHOULD be wired, skim
+ * our code doesn't debounce, but that will be a later addition but it's cool to help the kids understand digital/analog signals
+ *
+ * https://www.norwegiancreations.com/2017/09/arduino-tutorial-using-millis-instead-of-delay/ << Millis vs Delay, skim
+ * this is seriously a much more complex problem in modern x86 which would be cool to talk about to kids
+ * but i don't really got links for how complex time sharing is from schedulers to timer chirp interrupts, gnu linux, fork(), Cores + threads
+ * but I can explain what to look up
+ *
+ * understanding Fourier Transform, this is not Fast Fourier transform which is what we are using and is quite different but you should look that up
+ * https://www.youtube.com/watch?v=spUNpyF58BY&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=1 << 3b1b, probably the best explanations you could find
+ * https://www.youtube.com/watch?v=MBnnXbOM5S4&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=2
+ * https://www.youtube.com/watch?v=ToIXSwZ1pJU&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=3
+ * https://www.youtube.com/watch?v=r6sGWTCMz2k&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=4
+ */
+
 // ---- Configuration ---------------------------------------------------------
 // Frequency resolution = SAMPLE_RATE / SAMPLES = 50/128 = 0.39 Hz = 23.4 BPM
 // Parabolic interpolation around the peak gets us sub-bin (~1-2 BPM) accuracy.
@@ -90,20 +129,20 @@ byte SMALL_HEART[8] = {
 };
 
 // Define the 5x8 custom heart character
+// hashtags where the ones are so you can see how I drew it
 byte BIG_HEART[8] = {
 	0b00000, // 0
-	0b01010, // # #
+	0b01010, //  # #
 	0b11111, // #####
 	0b11111, // #####
 	0b01110, //  ###
 	0b00100, //   #
 	0b00000, // 0
-	0b00000 // 0
+	0b00000  // 0
 };
 
 // for debugging, detects connected I2C devices (LCD display in this case)
-/*
-void I2C_Scan() {
+/** void I2C_Scan() {
 	byte error, address;
 	int nDevices;
 
@@ -179,7 +218,7 @@ long delta = 1000;
 float total = 0;
 
 void loop() {
-	// // day 1 reading from a button and display to LCD
+	// Unit 1 reading from a button and display to LCD
 	// if (digitalRead(BTN_PIN) == LOW) {
 	// 	lcd.clear();
 	// 	// digitalWrite(LED_BUILTIN, LOW);
@@ -192,7 +231,7 @@ void loop() {
 	// Serial.print("Signal: ");
 	// Serial.println(signal);
 
-	/* Day 2: code, rolling avg threshold
+	/* Unit 2: code, rolling avg threshold
 	 *
 	*/
 	/*
@@ -226,9 +265,10 @@ void loop() {
 	delay(5);
 	*/
 
-	// final algo
+	// final algo -- Unit 3
 	unsigned long t = micros();
 	for (uint16_t i = 0; i < SAMPLES; i++) {
+
 		while ((long) (micros() - t) < 0) {
 			serviceLED(); // turn LED off on schedule
 		}
