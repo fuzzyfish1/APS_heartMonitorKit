@@ -3,16 +3,12 @@
 #include <LiquidCrystal_I2C.h>
 #include <arduinoFFT.h>
 
-#define BTN_PIN 4
+#include <biquad.h>
+
 #define LCD_ADDR 0x27
-// ^^ is wired like an I2C device, you should explain what I2C and address is,
-// wire SDA -> A4 + SCL -> A5 VCC-> 5V
-// the backlight display pins should have a jumper
 #define HBS_PIN A0
 
-// ----- for Day 2
-// program CTRL
-#define LCD_ROWS 4
+#define LCD_ROWS 2
 #define LCD_COLS 16
 
 #define SAMP_TME 16667 // in uS for analog smoothing
@@ -31,30 +27,18 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
  * Author: Zain Ali
  *
  * APS ReadySetCode HeartBeat Kit Example Code
- * Showcases 3 different algorithms for different ways to detect heartbeats
- *
- * Unit 1:
- * use a button to figure out hardware
- *
- * Unit 2:
- * use an Analog PulseSensor to do things
  *
  * Unit 3:
  * TROIKA ALGO, please see Docs
  *
  * Docs + links: labeled by skim or read or if you still want more
- * https://link.springer.com/article/10.1007/s11831-021-09597-4 << Cite this for TROIKA Algo, FRFR READ TS
+ * https://ieeexplore.ieee.org/abstract/document/6905737 << TODO: Cite this
  * https://learn.adafruit.com/scanning-i2c-addresses/arduino << I2C device scan, READ
  * https://gist.github.com/tfeldmann/5411375 << another I2C san (not the one I used but it's cool), if you want more
  * https://www.adafruit.com/product/1093?srsltid=AfmBOoqwTVR6AGR2bwP1o3GK9-nqLg_Dyd-FgV7eGp7fDjfm3NMKhWae << heartBeat Sensor, if you want more
  * https://medium.com/@lnandanapalli/efficient-array-wrapping-the-modulo-trick-every-developer-should-know-7ee614272100 << Modulo operator, READ mention to kids
- * https://docs.arduino.cc/built-in-examples/digital/Debounce/ << how the button SHOULD be wired, << for Zain for later, maybe you could add this in Unit 1 info
- * our code doesn't debounce, but that will be a later addition but it's cool to help the kids understand digital/analog signals
  *
  * https://www.norwegiancreations.com/2017/09/arduino-tutorial-using-millis-instead-of-delay/ << Millis vs Delay, READ
- * this is seriously a much more complex problem in modern x86 which would be cool to talk about to kids
- * but i don't really got links for how complex time sharing is from schedulers to timer chirp interrupts, gnu linux, fork(), Cores + threads
- * but I can explain what to look up
  *
  *** understanding Fourier Transform**,
  * this is not Fast Fourier transform which is what we are using and is quite different but this gives a mathematical foundation for it
@@ -63,6 +47,8 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
  * https://www.youtube.com/watch?v=MBnnXbOM5S4&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=2
  * https://www.youtube.com/watch?v=ToIXSwZ1pJU&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=3
  * https://www.youtube.com/watch?v=r6sGWTCMz2k&list=PL4VT47y1w7A1-T_VIcufa7mCM3XrSA5DD&index=4
+ *
+ * TODO: look into FIX_FFT, uses longs for FFT potentially resulting in much faster math (we don't have an FPU on Ard Nano)
  */
 
 // ---- Configuration ---------------------------------------------------------
@@ -77,18 +63,7 @@ float vReal[SAMPLES];
 float vImag[SAMPLES];
 ArduinoFFT<float> FFT(vReal, vImag, SAMPLES, SAMPLE_RATE);
 
-struct Biquad {
-	float b0, b1, b2, a1, a2, z1, z2;
-};
-
 Biquad bp = {0.1795f, 0.0f, -0.1795f, -1.6151f, 0.6409f, 0.0f, 0.0f};
-
-static inline float biquadStep(Biquad &f, float x) {
-	float y = f.b0 * x + f.z1;
-	f.z1 = f.b1 * x - f.a1 * y + f.z2;
-	f.z2 = f.b2 * x - f.a2 * y;
-	return y;
-}
 
 float trackedBPM = 75.0f;
 bool hrLocked = false;
@@ -108,16 +83,22 @@ bool ledOn = false;
 unsigned long ledOffAtMs = 0;
 const unsigned long LED_FLASH_MS = 120;
 
+void printHR() {
+	lcd.setCursor(0, 1);
+	lcd.print("HR: ");
+	lcd.print(trackedBPM, 1);
+	lcd.print(" BPM");
+}
+
 static inline void serviceLED() {
 	if (ledOn && (long) (millis() - ledOffAtMs) >= 0) {
-		lcd.setCursor(1,1);
+		lcd.setCursor(0,0);
 		lcd.write(0);
 		digitalWrite(LED_BUILTIN, LOW);
 		ledOn = false;
+		printHR();
 	}
 }
-
-//int i = 0;
 
 byte SMALL_HEART[8] = {
 	0b00000,
@@ -177,17 +158,16 @@ byte BIG_HEART[8] = {
 float reads[SAMP_N];
 
 void setup() {
-	Serial.begin(9600);
+	Serial.begin(115200);
 	Wire.begin();
 
 	// INPUT_PULLUP
 	pinMode(LED_BUILTIN, OUTPUT);
-	pinMode(BTN_PIN, INPUT_PULLUP);
-	// figure out how exactly
+	pinMode(HBS_PIN, INPUT_PULLUP);
 
-	// I2C_scan needs serial to be awake
+	// I2C_scan needs serial to work
 	while (!Serial);
-	//I2C_Scan();
+	//I2C_Scan(); // should detect your LCD, will show in Serial output
 
 	lcd.init();
 	lcd.backlight();
@@ -200,84 +180,31 @@ void setup() {
 	delay(1000);
 }
 
-// filters all 60hz signals entirely (mains power)
-/*
-int readFiltered(int pin) {
-	unsigned int sampleCount = 0;
-	unsigned long total = 0;
-
-	for (unsigned long start = micros(); micros() - start < SAMP_TME;) {
-		total += analogRead(pin);
-		sampleCount++;
-	}
-
-	return (int)(total / sampleCount);
-}
-*/
 bool rising = true;
 unsigned long peakTime = 0;
 long delta = 1000;
 float total = 0;
 
 void loop() {
-	// Unit 1 reading from a button and display to LCD
-	// if (digitalRead(BTN_PIN) == LOW) {
-	// 	lcd.clear();
-	// 	// digitalWrite(LED_BUILTIN, LOW);
-	// } else if (digitalRead(BTN_PIN) == HIGH) {
-	// 	// digitalWrite(LED_BUILTIN, HIGH);
-	// 	lcd.setCursor(0, 0);
-	// 	lcd.print("Button Pressed");
-	// }
 
-	// Serial.print("Signal: ");
-	// Serial.println(signal);
-
-	/* Unit 2: code, rolling avg threshold
-	 *
-	*/
-	/*
-	reads[i] = analogRead(HBS_PIN);
-	total += reads[i] - reads[(i + 1) % SAMP_N];
-
-	float avg = total / SAMP_N;
-
-	Serial.print("avg: ");
-	Serial.print(avg);
-	Serial.print(", read: ");
-	Serial.print(reads[i]);
-	Serial.print(", i: ");
-	Serial.print(i);
-
-	if (reads[i] > avg) {
-		lcd.setCursor(0,0);
-		lcd.write(1);
-		lcd.print("BEAT");
-		Serial.print("BEAT");
-		digitalWrite(LED_BUILTIN, HIGH);
-	} else {
-		lcd.clear();
-		lcd.write(0);
-		digitalWrite(LED_BUILTIN, LOW);
-	}
-
-	++i %= SAMP_N;
-	Serial.println("");
-
-	delay(5);
-	*/
-
-	// final algo -- Unit 3
 	unsigned long t = micros();
-	for (uint16_t i = 0; i < SAMPLES; i++) {
 
+	for (uint16_t i = 0; i < SAMPLES; i++) {
 		while ((long) (micros() - t) < 0) {
 			serviceLED(); // turn LED off on schedule
 		}
 		t += SAMPLE_US;
 
 		int raw = analogRead(HBS_PIN);
-		float x = (float) raw - 512.0f;
+
+		static long timePrintLast = millis();
+		if (millis() - timePrintLast >= 20) {
+			timePrintLast = millis();
+			Serial.print("Raw: ");
+			Serial.println(raw);
+		}
+
+		const float x = (float) raw - 512.0f;
 		float y = biquadStep(bp, x);
 		vReal[i] = y;
 		vImag[i] = 0.0f;
@@ -293,11 +220,12 @@ void loop() {
 			aboveThresh = true;
 			lastBeatMs = nowMs;
 
-			lcd.setCursor(1,1);
+			lcd.setCursor(0,0);
 			lcd.write(1);
 			digitalWrite(LED_BUILTIN, HIGH);
 			ledOn = true;
 			ledOffAtMs = nowMs + LED_FLASH_MS;
+			printHR();
 		}
 		if (aboveThresh && y < runMean) {
 			aboveThresh = false;
@@ -372,10 +300,10 @@ void loop() {
 
 	Serial.print(F("BPM: "));
 	Serial.println(trackedBPM, 1);
+
+
 	lcd.clear();
 	lcd.setCursor(0, 0);
-	lcd.print("BPM: ");
-	lcd.print(bpm);
 
 	serviceLED();
 }
