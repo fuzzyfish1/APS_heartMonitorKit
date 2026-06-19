@@ -76,17 +76,9 @@ void beat() {
 	// if the lastClear happened last
 	// to avoid looping lcd.clear()
 	if (lastClear >= lastBeat) {
-		Serial.println("Beat!");
-		lcd.clear();
-		lcd.setCursor(0, 0);
-		lcd.write(1);
+		// Step 4: write the code that reacts to a beat
 
-		// step 6
-		heartRate = 60000.f / (float)(millis() - lastBeat); // 60000 ms in one minute, frequency is 1/ period
-		lcd.print(" HR: ");
-		lcd.print(heartRate);
-		lcd.print("BPM");
-		// step 6
+		// Step 6: HB calculations and display here
 
 		lastBeat = millis();
 		digitalWrite(LED_BUILTIN, HIGH);
@@ -98,17 +90,12 @@ void ledService() {
 	// if lastBeat was at least BEAT_... ago
 	// and the lastBeat happened last, to avoid looping lcd.clear()
 	if ((millis() - lastBeat) > BEAT_TIME_MS && lastBeat > lastClear) {
-		lcd.clear();
-		lcd.setCursor(0,0);
-		lcd.write(0);
-		digitalWrite(LED_BUILTIN, LOW);
+		
+		// Step 4: write the code that resets everything after a heartbeat
+
 		lastClear = millis();
 
-		lcd.print(" HR: ");
-		lcd.print(heartRate);
-		lcd.print("BPM");
-
-		// step 6: don't erase the heart rate value
+		// Step 6: print HB here, so it doesn't go away after clear
 	}
 }
 
@@ -150,9 +137,8 @@ void setup() {
 	Serial.begin(115200);
 	Wire.begin();
 
-	// START HERE
-	pinMode(LED_BUILTIN, OUTPUT);
-	pinMode(HBS_PIN, INPUT_PULLUP);
+	// START HERE, pinMode()
+
 
 	// I2C_scan needs serial to be awake
 	while (!Serial);
@@ -177,8 +163,8 @@ long total = 0;
 
 void loop() {
 
-	// step 3 plot this
-	long raw = analogRead(HBS_PIN);
+	// step 3 reading Data
+	long raw = ;
 
 	static unsigned long lastPrint = millis();
 	if (millis() - lastPrint > 50) {
@@ -187,20 +173,13 @@ void loop() {
 		Serial.println(raw);
 	}
 
-	// step 4, write beat, ledService, tune thresh using graph
-	// I got thresh ~= 570
+	// step 4, tune thresh from graph, write beat, and ledService
 	if (raw > thresh) {
 		beat();
 	}
 
-	// step 5, thresh is a function of an AVG of all the reads for
-	reads[i] = raw;
-	total += raw - reads[(i + 1) % SAMP_N]; // add the new value, remove the last value
-	thresh = 50.f + (float)total / (float)SAMP_N; // thresh is now an average
-	delay(10);
 
-	i++;
-	i %= SAMP_N;
+	// step 5, thresh is a function of an AVG of all the reads for
 
 	ledService();
 }
